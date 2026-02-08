@@ -107,7 +107,10 @@ export function createEventHandlers(context: EventHandlerContext) {
         return;
       }
       chatLog.updateAssistant(displayText, evt.runId);
-      setActivityStatus("streaming");
+      // Don't overwrite tool emoji status while a tool is active
+      if (!lastToolStatusAt && !toolStatusResetTimer) {
+        setActivityStatus("streaming");
+      }
     }
     if (evt.state === "final") {
       if (isCommandMessage(evt.message)) {
@@ -245,11 +248,13 @@ export function createEventHandlers(context: EventHandlerContext) {
         const remaining = MIN_TOOL_STATUS_MS - elapsed;
         if (remaining > 0) {
           toolStatusResetTimer = setTimeout(() => {
+            lastToolStatusAt = null;
+            toolStatusResetTimer = null;
             setActivityStatus("running");
             tui.requestRender();
-            toolStatusResetTimer = null;
           }, remaining);
         } else {
+          lastToolStatusAt = null;
           setActivityStatus("running");
         }
       }
@@ -262,9 +267,17 @@ export function createEventHandlers(context: EventHandlerContext) {
       }
       const phase = typeof evt.data?.phase === "string" ? evt.data.phase : "";
       if (phase === "start") {
-        setActivityStatus("running");
+        // Don't overwrite tool emoji status
+        if (!lastToolStatusAt && !toolStatusResetTimer) {
+          setActivityStatus("running");
+        }
       }
       if (phase === "end") {
+        lastToolStatusAt = null;
+        if (toolStatusResetTimer) {
+          clearTimeout(toolStatusResetTimer);
+          toolStatusResetTimer = null;
+        }
         setActivityStatus("idle");
       }
       if (phase === "error") {

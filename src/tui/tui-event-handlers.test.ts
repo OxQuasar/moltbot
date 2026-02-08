@@ -336,6 +336,191 @@ describe("tui-event-handlers: handleAgentEvent", () => {
     );
   });
 
+  it("blocks delta 'streaming' status while tool emoji is active", () => {
+    const state = makeState({ activeChatRunId: "run-1" });
+    const { chatLog, tui, setActivityStatus } = makeContext(state);
+    const { handleChatEvent, handleAgentEvent } = createEventHandlers({
+      chatLog,
+      tui,
+      state,
+      setActivityStatus,
+    });
+
+    // Register the run via a chat delta first
+    handleChatEvent({
+      runId: "run-1",
+      sessionKey: state.currentSessionKey,
+      state: "delta",
+      message: { content: "hello" },
+    });
+    setActivityStatus.mockClear();
+
+    // Start a tool — sets the tool emoji hold
+    handleAgentEvent({
+      runId: "run-1",
+      stream: "tool",
+      data: { phase: "start", toolCallId: "tc1", name: "exec", args: {} },
+    });
+    expect(setActivityStatus).toHaveBeenCalledWith(expect.stringMatching(/…$/));
+    setActivityStatus.mockClear();
+
+    // Another delta arrives while tool is active
+    handleChatEvent({
+      runId: "run-1",
+      sessionKey: state.currentSessionKey,
+      state: "delta",
+      message: { content: "world" },
+    });
+
+    // "streaming" should NOT have been called — tool emoji is held
+    expect(setActivityStatus).not.toHaveBeenCalledWith("streaming");
+  });
+
+  it("blocks lifecycle 'running' status while tool emoji is active", () => {
+    const state = makeState({ activeChatRunId: "run-1" });
+    const { chatLog, tui, setActivityStatus } = makeContext(state);
+    const { handleChatEvent, handleAgentEvent } = createEventHandlers({
+      chatLog,
+      tui,
+      state,
+      setActivityStatus,
+    });
+
+    // Register the run
+    handleChatEvent({
+      runId: "run-1",
+      sessionKey: state.currentSessionKey,
+      state: "delta",
+      message: { content: "hi" },
+    });
+    setActivityStatus.mockClear();
+
+    // Start a tool
+    handleAgentEvent({
+      runId: "run-1",
+      stream: "tool",
+      data: { phase: "start", toolCallId: "tc1", name: "exec", args: {} },
+    });
+    setActivityStatus.mockClear();
+
+    // Lifecycle start fires while tool is active
+    handleAgentEvent({
+      runId: "run-1",
+      stream: "lifecycle",
+      data: { phase: "start" },
+    });
+
+    // "running" should NOT have been called
+    expect(setActivityStatus).not.toHaveBeenCalledWith("running");
+  });
+
+  it("terminal chat state clears tool emoji hold", () => {
+    const state = makeState({ activeChatRunId: "run-1" });
+    const { chatLog, tui, setActivityStatus } = makeContext(state);
+    const { handleChatEvent, handleAgentEvent } = createEventHandlers({
+      chatLog,
+      tui,
+      state,
+      setActivityStatus,
+    });
+
+    // Register the run
+    handleChatEvent({
+      runId: "run-1",
+      sessionKey: state.currentSessionKey,
+      state: "delta",
+      message: { content: "hi" },
+    });
+
+    // Start a tool
+    handleAgentEvent({
+      runId: "run-1",
+      stream: "tool",
+      data: { phase: "start", toolCallId: "tc1", name: "exec", args: {} },
+    });
+    setActivityStatus.mockClear();
+
+    // Chat aborted fires while tool is active
+    handleChatEvent({
+      runId: "run-1",
+      sessionKey: state.currentSessionKey,
+      state: "aborted",
+      message: null,
+    });
+
+    expect(setActivityStatus).toHaveBeenCalledWith("aborted");
+  });
+
+  it("resumes streaming status after tool hold timer expires", () => {
+    vi.useFakeTimers();
+    try {
+      const state = makeState({ activeChatRunId: "run-1" });
+      const { chatLog, tui, setActivityStatus } = makeContext(state);
+      const { handleChatEvent, handleAgentEvent } = createEventHandlers({
+        chatLog,
+        tui,
+        state,
+        setActivityStatus,
+      });
+
+      // Register the run
+      handleChatEvent({
+        runId: "run-1",
+        sessionKey: state.currentSessionKey,
+        state: "delta",
+        message: { content: "hi" },
+      });
+
+      // Start a tool
+      handleAgentEvent({
+        runId: "run-1",
+        stream: "tool",
+        data: { phase: "start", toolCallId: "tc1", name: "exec", args: {} },
+      });
+
+      // Tool result arrives immediately (elapsed < MIN_TOOL_STATUS_MS) — timer set
+      handleAgentEvent({
+        runId: "run-1",
+        stream: "tool",
+        data: {
+          phase: "result",
+          toolCallId: "tc1",
+          name: "exec",
+          result: { content: [] },
+          isError: false,
+        },
+      });
+      setActivityStatus.mockClear();
+
+      // During hold: delta should not set "streaming"
+      handleChatEvent({
+        runId: "run-1",
+        sessionKey: state.currentSessionKey,
+        state: "delta",
+        message: { content: "more" },
+      });
+      expect(setActivityStatus).not.toHaveBeenCalledWith("streaming");
+
+      // Advance past the hold timer
+      vi.advanceTimersByTime(1500);
+
+      // Timer should have fired and set "running"
+      expect(setActivityStatus).toHaveBeenCalledWith("running");
+      setActivityStatus.mockClear();
+
+      // Now a new delta should set "streaming" again
+      handleChatEvent({
+        runId: "run-1",
+        sessionKey: state.currentSessionKey,
+        state: "delta",
+        message: { content: "resumed" },
+      });
+      expect(setActivityStatus).toHaveBeenCalledWith("streaming");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("refreshes history after a non-local chat final", () => {
     const state = makeState({ activeChatRunId: null });
     const { chatLog, tui, setActivityStatus, loadHistory, isLocalRunId, forgetLocalRunId } =

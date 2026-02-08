@@ -126,6 +126,7 @@ export function createEventHandlers(context: EventHandlerContext) {
         streamAssembler.drop(evt.runId);
         noteFinalizedRun(evt.runId);
         state.activeChatRunId = null;
+        clearToolEmojiHold();
         setActivityStatus("idle");
         void refreshSessionInfo?.();
         tui.requestRender();
@@ -147,6 +148,7 @@ export function createEventHandlers(context: EventHandlerContext) {
       chatLog.finalizeAssistant(finalText, evt.runId);
       noteFinalizedRun(evt.runId);
       state.activeChatRunId = null;
+      clearToolEmojiHold();
       setActivityStatus(stopReason === "error" ? "error" : "idle");
       // Refresh session info to update token counts in footer
       void refreshSessionInfo?.();
@@ -156,6 +158,7 @@ export function createEventHandlers(context: EventHandlerContext) {
       streamAssembler.drop(evt.runId);
       sessionRuns.delete(evt.runId);
       state.activeChatRunId = null;
+      clearToolEmojiHold();
       setActivityStatus("aborted");
       void refreshSessionInfo?.();
       if (isLocalRunId?.(evt.runId)) {
@@ -169,6 +172,7 @@ export function createEventHandlers(context: EventHandlerContext) {
       streamAssembler.drop(evt.runId);
       sessionRuns.delete(evt.runId);
       state.activeChatRunId = null;
+      clearToolEmojiHold();
       setActivityStatus("error");
       void refreshSessionInfo?.();
       if (isLocalRunId?.(evt.runId)) {
@@ -184,6 +188,14 @@ export function createEventHandlers(context: EventHandlerContext) {
   let lastToolStatusAt: number | null = null;
   let toolStatusResetTimer: ReturnType<typeof setTimeout> | null = null;
   const MIN_TOOL_STATUS_MS = 1000;
+
+  const clearToolEmojiHold = () => {
+    lastToolStatusAt = null;
+    if (toolStatusResetTimer) {
+      clearTimeout(toolStatusResetTimer);
+      toolStatusResetTimer = null;
+    }
+  };
 
   const handleAgentEvent = (payload: unknown) => {
     if (!payload || typeof payload !== "object") {
@@ -273,14 +285,11 @@ export function createEventHandlers(context: EventHandlerContext) {
         }
       }
       if (phase === "end") {
-        lastToolStatusAt = null;
-        if (toolStatusResetTimer) {
-          clearTimeout(toolStatusResetTimer);
-          toolStatusResetTimer = null;
-        }
+        clearToolEmojiHold();
         setActivityStatus("idle");
       }
       if (phase === "error") {
+        clearToolEmojiHold();
         setActivityStatus("error");
       }
       tui.requestRender();

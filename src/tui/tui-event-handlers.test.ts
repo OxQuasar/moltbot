@@ -267,7 +267,7 @@ describe("tui-event-handlers: handleAgentEvent", () => {
     expect(tui.requestRender).not.toHaveBeenCalled();
   });
 
-  it("suppresses tool events when verbose is off", () => {
+  it("suppresses chat log but still shows status emoji when verbose is off", () => {
     const state = makeState({
       activeChatRunId: "run-123",
       sessionInfo: { verboseLevel: "off" },
@@ -287,7 +287,9 @@ describe("tui-event-handlers: handleAgentEvent", () => {
     });
 
     expect(chatLog.startTool).not.toHaveBeenCalled();
-    expect(tui.requestRender).not.toHaveBeenCalled();
+    expect(setActivityStatus).toHaveBeenCalledTimes(1);
+    expect(setActivityStatus.mock.calls[0][0]).toMatch(/…$/);
+    expect(tui.requestRender).toHaveBeenCalledTimes(1);
   });
 
   it("omits tool output when verbose is on (non-full)", () => {

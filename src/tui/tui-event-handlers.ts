@@ -200,9 +200,6 @@ export function createEventHandlers(context: EventHandlerContext) {
       const verbose = state.sessionInfo.verboseLevel ?? "off";
       const allowToolEvents = verbose !== "off";
       const allowToolOutput = verbose === "full";
-      if (!allowToolEvents) {
-        return;
-      }
       const data = evt.data ?? {};
       const phase = asString(data.phase, "");
       const toolCallId = asString(data.toolCallId, "");
@@ -211,10 +208,11 @@ export function createEventHandlers(context: EventHandlerContext) {
         return;
       }
       if (phase === "start") {
-        chatLog.startTool(toolCallId, toolName, data.args);
+        if (allowToolEvents) {
+          chatLog.startTool(toolCallId, toolName, data.args);
+        }
         // Show tool with emoji in status bar during execution
         const display = resolveToolDisplay({ name: toolName, args: data.args });
-        // Clear any pending reset timer
         if (toolStatusResetTimer) {
           clearTimeout(toolStatusResetTimer);
           toolStatusResetTimer = null;
@@ -229,12 +227,18 @@ export function createEventHandlers(context: EventHandlerContext) {
           partial: true,
         });
       } else if (phase === "result") {
-        if (allowToolOutput) {
-          chatLog.updateToolResult(toolCallId, data.result, {
-            isError: Boolean(data.isError),
-          });
-        } else {
-          chatLog.updateToolResult(toolCallId, { content: [] }, { isError: Boolean(data.isError) });
+        if (allowToolEvents) {
+          if (allowToolOutput) {
+            chatLog.updateToolResult(toolCallId, data.result, {
+              isError: Boolean(data.isError),
+            });
+          } else {
+            chatLog.updateToolResult(
+              toolCallId,
+              { content: [] },
+              { isError: Boolean(data.isError) },
+            );
+          }
         }
         // Reset status after tool completes, but ensure status visible for minimum time
         const elapsed = lastToolStatusAt ? Date.now() - lastToolStatusAt : MIN_TOOL_STATUS_MS;

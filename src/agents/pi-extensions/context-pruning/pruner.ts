@@ -276,6 +276,10 @@ export function pruneContextMessages(params: {
     if (!isToolPrunable(msg.toolName)) {
       continue;
     }
+    // Skip messages tagged with pruneProtect (e.g. skill reads)
+    if ((msg as { pruneProtect?: boolean }).pruneProtect === true) {
+      continue;
+    }
     if (hasImageBlocks(msg.content)) {
       continue;
     }

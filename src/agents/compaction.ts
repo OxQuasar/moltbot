@@ -15,7 +15,7 @@ export const PRUNE_PROTECT_TOKENS = 40_000;
 export const PRUNE_MINIMUM_TOKENS = 20_000;
 
 /** Tools that should never have their outputs pruned. */
-export const PRUNE_PROTECTED_TOOLS = ["skill", "memory_search", "gandiva_recall"];
+export const PRUNE_PROTECTED_TOOLS = ["memory_search", "gandiva_recall"];
 
 // =============================================================================
 // Existing Constants
@@ -446,17 +446,23 @@ export function pruneToolOutputs(
   // Walk backwards through messages
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
-    if (!msg) continue;
+    if (!msg) {
+      continue;
+    }
 
     // Count user turns to protect recent interaction (last 2 user messages)
     if (msg.role === "user") {
       userTurns++;
     }
     // Protect all messages until we've passed 2 user turns from the end
-    if (userTurns < 2) continue;
+    if (userTurns < 2) {
+      continue;
+    }
 
     // Stop at summary boundary (already compacted)
-    if ((msg as { summary?: boolean }).summary === true) break;
+    if ((msg as { summary?: boolean }).summary === true) {
+      break;
+    }
 
     // Check for tool results
     if (msg.role === "toolResult") {
@@ -464,7 +470,13 @@ export function pruneToolOutputs(
       const toolName = toolMsg.toolName ?? "";
 
       // Skip protected tools
-      if (protectedTools.has(toolName)) continue;
+      if (protectedTools.has(toolName)) {
+        continue;
+      }
+      // Skip messages tagged with pruneProtect (e.g. skill reads)
+      if ((msg as { pruneProtect?: boolean }).pruneProtect === true) {
+        continue;
+      }
 
       const tokens = estimateTokens(msg);
       totalToolTokens += tokens;

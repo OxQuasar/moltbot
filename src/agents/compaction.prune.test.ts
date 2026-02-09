@@ -44,7 +44,9 @@ function generateLargeOutput(tokens: number): string {
  */
 function padToTokens(realisticContent: string, tokens: number): string {
   const targetChars = tokens * 4;
-  if (realisticContent.length >= targetChars) return realisticContent;
+  if (realisticContent.length >= targetChars) {
+    return realisticContent;
+  }
   return realisticContent + "\n" + "·".repeat(targetChars - realisticContent.length - 1);
 }
 
@@ -81,8 +83,9 @@ describe("pruneToolOutputs", () => {
   it("exports default constants", () => {
     expect(PRUNE_PROTECT_TOKENS).toBe(40_000);
     expect(PRUNE_MINIMUM_TOKENS).toBe(20_000);
-    expect(PRUNE_PROTECTED_TOOLS).toContain("skill");
+    expect(PRUNE_PROTECTED_TOOLS).toContain("memory_search");
     expect(PRUNE_PROTECTED_TOOLS).toContain("gandiva_recall");
+    expect(PRUNE_PROTECTED_TOOLS).not.toContain("skill");
   });
 
   it("does not prune when below minimum threshold", () => {
@@ -214,6 +217,58 @@ describe("pruneToolOutputs", () => {
     expect(result.prunableCount).toBe(1);
   });
 
+  it("respects pruneProtect field on messages", () => {
+    const protectedMsg = makeToolResult("exec", generateLargeOutput(50_000));
+    (protectedMsg as { pruneProtect?: boolean }).pruneProtect = true;
+
+    const messages: AgentMessage[] = [
+      makeUserMessage("start"),
+      protectedMsg, // pruneProtect: true — should NOT be pruned
+      makeToolResult("exec", generateLargeOutput(50_000)), // No tag — should be pruned
+      makeUserMessage("recent 1"),
+      makeUserMessage("recent 2"),
+    ];
+
+    const result = pruneToolOutputs(messages, {
+      protectTokens: 1000,
+      minimumTokens: 10_000,
+    });
+
+    expect(result.didPrune).toBe(true);
+    // Only the unprotected exec should be pruned
+    expect(result.prunedCount).toBe(1);
+    const taggedMsg = messages[1] as { prunedAt?: number };
+    expect(taggedMsg.prunedAt).toBeUndefined();
+    const untaggedMsg = messages[2] as { prunedAt?: number };
+    expect(untaggedMsg.prunedAt).toBeDefined();
+  });
+
+  it("pruneProtect works alongside tool name protection", () => {
+    const protectedByTag = makeToolResult("exec", generateLargeOutput(50_000));
+    (protectedByTag as { pruneProtect?: boolean }).pruneProtect = true;
+
+    const messages: AgentMessage[] = [
+      makeUserMessage("start"),
+      protectedByTag, // Protected by tag
+      makeToolResult("memory_search", generateLargeOutput(50_000)), // Protected by name
+      makeToolResult("exec", generateLargeOutput(50_000)), // Not protected
+      makeUserMessage("recent 1"),
+      makeUserMessage("recent 2"),
+    ];
+
+    const result = pruneToolOutputs(messages, {
+      protectTokens: 1000,
+      minimumTokens: 10_000,
+    });
+
+    expect(result.didPrune).toBe(true);
+    expect(result.prunedCount).toBe(1);
+    // Only index 3 (unprotected exec) should be pruned
+    expect((messages[1] as { prunedAt?: number }).prunedAt).toBeUndefined();
+    expect((messages[2] as { prunedAt?: number }).prunedAt).toBeUndefined();
+    expect((messages[3] as { prunedAt?: number }).prunedAt).toBeDefined();
+  });
+
   it("replaces pruned content with placeholder", () => {
     const messages: AgentMessage[] = [
       makeUserMessage("start"),
@@ -246,7 +301,7 @@ describe("pruneToolOutputs – realistic before/after scenarios", () => {
   const opts = {
     protectTokens: 2_000,
     minimumTokens: 1_000,
-    protectedTools: ["memory_search", "skill"],
+    protectedTools: ["memory_search"],
   };
 
   it("coding session: old file reads + bash get pruned, recent stay intact", () => {
@@ -332,7 +387,7 @@ describe("pruneToolOutputs – realistic before/after scenarios", () => {
     }
   });
 
-  it("mixed tools: memory_search protected, exec/read pruned, skill protected", () => {
+  it("mixed tools: memory_search protected, exec/read pruned, pruneProtect-tagged protected", () => {
     const memoryOutput = padToTokens(
       `Found 3 memories:\n1. User prefers dark mode\n2. Project uses PostgreSQL\n3. Deploy target is fly.io`,
       3_000,
@@ -345,23 +400,24 @@ describe("pruneToolOutputs – realistic before/after scenarios", () => {
       `// docker-compose.yml\nversion: "3.8"\nservices:\n  db:\n    image: postgres:16\n    ports:\n      - "5432:5432"\n  redis:\n    image: redis:7`,
       3_000,
     );
-    const skillOutput = padToTokens(
-      `Skill "deploy" executed: deployed to fly.io successfully.`,
-      2_500,
-    );
+    const skillReadOutput = padToTokens(`# Deploy Skill\nDeploy to fly.io using flyctl.`, 2_500);
+
+    // Simulate a skill read tagged with pruneProtect by the handler
+    const skillReadMsg = makeToolResult("read", skillReadOutput);
+    (skillReadMsg as { pruneProtect?: boolean }).pruneProtect = true;
 
     const messages: AgentMessage[] = [
       // --- Turn 1 (old) ---
       makeUserMessage("Check what's running and read the docker compose"),
       makeAssistantMessage("Let me check."),
-      makeToolResult("memory_search", memoryOutput), // protected
+      makeToolResult("memory_search", memoryOutput), // protected by name
       makeToolResult("exec", execOutput), // should be pruned
       makeToolResult("read_file", readOutput), // should be pruned
       makeAssistantMessage("PostgreSQL and Redis are running."),
       // --- Turn 2 (old) ---
       makeUserMessage("Deploy using the deploy skill"),
       makeAssistantMessage("Running the deploy skill now."),
-      makeToolResult("skill", skillOutput), // protected
+      skillReadMsg, // protected by pruneProtect tag
       makeAssistantMessage("Deployed successfully to fly.io."),
       // --- Turn 3 (recent) ---
       makeUserMessage("Check the deployment status"),
@@ -390,9 +446,9 @@ describe("pruneToolOutputs – realistic before/after scenarios", () => {
     expect(after[4]).toMatchObject({ tool: "read_file", pruned: true });
     expect(after[4]!.contentPreview).toBe("[output pruned for context]");
 
-    // skill (index 8) stays intact – protected tool
-    expect(after[8]).toMatchObject({ tool: "skill", pruned: false });
-    expect(after[8]!.contentPreview).toContain("deploy");
+    // skill read (index 8) stays intact – protected by pruneProtect tag
+    expect(after[8]).toMatchObject({ tool: "read", pruned: false });
+    expect(after[8]!.contentPreview).toContain("Deploy Skill");
 
     // Recent exec (index 12) stays intact – within last 2 user turns
     expect(after[12]).toMatchObject({ tool: "exec", pruned: false });

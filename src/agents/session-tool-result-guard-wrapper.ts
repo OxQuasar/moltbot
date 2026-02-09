@@ -1,5 +1,6 @@
 import type { SessionManager } from "@mariozechner/pi-coding-agent";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
+import { createPruneProtectHandler } from "./prune-protect-handler.js";
 import { installSessionToolResultGuard } from "./session-tool-result-guard.js";
 
 export type GuardedSessionManager = SessionManager & {
@@ -24,29 +25,54 @@ export function guardSessionManager(
   }
 
   const hookRunner = getGlobalHookRunner();
-  const transform = hookRunner?.hasHooks("tool_result_persist")
-    ? // oxlint-disable-next-line typescript/no-explicit-any
-      (message: any, meta: { toolCallId?: string; toolName?: string; isSynthetic?: boolean }) => {
-        const out = hookRunner.runToolResultPersist(
-          {
-            toolName: meta.toolName,
-            toolCallId: meta.toolCallId,
-            message,
-            isSynthetic: meta.isSynthetic,
-          },
-          {
-            agentId: opts?.agentId,
-            sessionKey: opts?.sessionKey,
-            toolName: meta.toolName,
-            toolCallId: meta.toolCallId,
-          },
-        );
-        return out?.message ?? message;
+  const { handler: builtInProtectHandler, resetTurn } = createPruneProtectHandler();
+
+  // oxlint-disable-next-line typescript/no-explicit-any
+  const transform = (
+    message: any,
+    meta: {
+      toolCallId?: string;
+      toolName?: string;
+      toolArgs?: Record<string, unknown>;
+      isSynthetic?: boolean;
+    },
+  ) => {
+    const event = {
+      toolName: meta.toolName,
+      toolCallId: meta.toolCallId,
+      toolArgs: meta.toolArgs,
+      message,
+      isSynthetic: meta.isSynthetic,
+    };
+    const ctx = {
+      agentId: opts?.agentId,
+      sessionKey: opts?.sessionKey,
+      toolName: meta.toolName,
+      toolCallId: meta.toolCallId,
+      toolArgs: meta.toolArgs,
+    };
+
+    // 1. Apply built-in pruneProtect handler (turn-aware)
+    let current = message;
+    const builtInResult = builtInProtectHandler(event, ctx);
+    if (builtInResult?.message) {
+      current = builtInResult.message;
+    }
+
+    // 2. Then run plugin hooks (if any)
+    if (hookRunner?.hasHooks("tool_result_persist")) {
+      const out = hookRunner.runToolResultPersist({ ...event, message: current }, ctx);
+      if (out?.message) {
+        current = out.message;
       }
-    : undefined;
+    }
+
+    return current;
+  };
 
   const guard = installSessionToolResultGuard(sessionManager, {
     transformToolResultForPersistence: transform,
+    onUserMessage: resetTurn,
     allowSyntheticToolResults: opts?.allowSyntheticToolResults,
   });
   (sessionManager as GuardedSessionManager).flushPendingToolResults = guard.flushPendingToolResults;

@@ -71,7 +71,7 @@ function capToolResultSize(msg: AgentMessage): AgentMessage {
   return { ...msg, content: newContent } as AgentMessage;
 }
 
-type ToolCall = { id: string; name?: string };
+type ToolCall = { id: string; name?: string; args?: Record<string, unknown> };
 
 function extractAssistantToolCalls(msg: Extract<AgentMessage, { role: "assistant" }>): ToolCall[] {
   const content = msg.content;
@@ -84,14 +84,19 @@ function extractAssistantToolCalls(msg: Extract<AgentMessage, { role: "assistant
     if (!block || typeof block !== "object") {
       continue;
     }
-    const rec = block as { type?: unknown; id?: unknown; name?: unknown };
+    const rec = block as { type?: unknown; id?: unknown; name?: unknown; arguments?: unknown };
     if (typeof rec.id !== "string" || !rec.id) {
       continue;
     }
     if (rec.type === "toolCall" || rec.type === "toolUse" || rec.type === "functionCall") {
+      const args =
+        rec.arguments && typeof rec.arguments === "object" && !Array.isArray(rec.arguments)
+          ? (rec.arguments as Record<string, unknown>)
+          : undefined;
       toolCalls.push({
         id: rec.id,
         name: typeof rec.name === "string" ? rec.name : undefined,
+        args,
       });
     }
   }
@@ -110,6 +115,8 @@ function extractToolResultId(msg: Extract<AgentMessage, { role: "toolResult" }>)
   return null;
 }
 
+type PendingToolCall = { toolName?: string; args?: Record<string, unknown> };
+
 export function installSessionToolResultGuard(
   sessionManager: SessionManager,
   opts?: {
@@ -119,24 +126,39 @@ export function installSessionToolResultGuard(
      */
     transformToolResultForPersistence?: (
       message: AgentMessage,
-      meta: { toolCallId?: string; toolName?: string; isSynthetic?: boolean },
+      meta: {
+        toolCallId?: string;
+        toolName?: string;
+        toolArgs?: Record<string, unknown>;
+        isSynthetic?: boolean;
+      },
     ) => AgentMessage;
     /**
      * Whether to synthesize missing tool results to satisfy strict providers.
      * Defaults to true.
      */
     allowSyntheticToolResults?: boolean;
+    /**
+     * Called when a user message is appended, allowing callers to
+     * reset turn-scoped state (e.g. skill-read protection).
+     */
+    onUserMessage?: () => void;
   },
 ): {
   flushPendingToolResults: () => void;
   getPendingIds: () => string[];
 } {
   const originalAppend = sessionManager.appendMessage.bind(sessionManager);
-  const pending = new Map<string, string | undefined>();
+  const pending = new Map<string, PendingToolCall>();
 
   const persistToolResult = (
     message: AgentMessage,
-    meta: { toolCallId?: string; toolName?: string; isSynthetic?: boolean },
+    meta: {
+      toolCallId?: string;
+      toolName?: string;
+      toolArgs?: Record<string, unknown>;
+      isSynthetic?: boolean;
+    },
   ) => {
     const transformer = opts?.transformToolResultForPersistence;
     return transformer ? transformer(message, meta) : message;
@@ -149,12 +171,12 @@ export function installSessionToolResultGuard(
       return;
     }
     if (allowSyntheticToolResults) {
-      for (const [id, name] of pending.entries()) {
-        const synthetic = makeMissingToolResult({ toolCallId: id, toolName: name });
+      for (const [id, entry] of pending.entries()) {
+        const synthetic = makeMissingToolResult({ toolCallId: id, toolName: entry.toolName });
         originalAppend(
           persistToolResult(synthetic, {
             toolCallId: id,
-            toolName: name,
+            toolName: entry.toolName,
             isSynthetic: true,
           }) as never,
         );
@@ -166,6 +188,9 @@ export function installSessionToolResultGuard(
   const guardedAppend = (message: AgentMessage) => {
     let nextMessage = message;
     const role = (message as { role?: unknown }).role;
+    if (role === "user") {
+      opts?.onUserMessage?.();
+    }
     if (role === "assistant") {
       const sanitized = sanitizeToolCallInputs([message]);
       if (sanitized.length === 0) {
@@ -180,7 +205,9 @@ export function installSessionToolResultGuard(
 
     if (nextRole === "toolResult") {
       const id = extractToolResultId(nextMessage as Extract<AgentMessage, { role: "toolResult" }>);
-      const toolName = id ? pending.get(id) : undefined;
+      const entry = id ? pending.get(id) : undefined;
+      const toolName = entry?.toolName;
+      const toolArgs = entry?.args;
       if (id) {
         pending.delete(id);
       }
@@ -191,6 +218,7 @@ export function installSessionToolResultGuard(
         persistToolResult(capped, {
           toolCallId: id ?? undefined,
           toolName,
+          toolArgs,
           isSynthetic: false,
         }) as never,
       );
@@ -223,7 +251,7 @@ export function installSessionToolResultGuard(
 
     if (toolCalls.length > 0) {
       for (const call of toolCalls) {
-        pending.set(call.id, call.name);
+        pending.set(call.id, { toolName: call.name, args: call.args });
       }
     }
 

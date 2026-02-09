@@ -418,11 +418,13 @@ export type PluginHookToolResultPersistContext = {
   sessionKey?: string;
   toolName?: string;
   toolCallId?: string;
+  toolArgs?: Record<string, unknown>;
 };
 
 export type PluginHookToolResultPersistEvent = {
   toolName?: string;
   toolCallId?: string;
+  toolArgs?: Record<string, unknown>;
   /**
    * The toolResult message about to be written to the session transcript.
    * Handlers may return a modified message (e.g. drop non-essential fields).

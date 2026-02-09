@@ -1,6 +1,8 @@
 import AjvPkg, { type ErrorObject } from "ajv";
 import type { SessionsPatchResult } from "../session-utils.types.js";
 import {
+  type AgentAbortParams,
+  AgentAbortParamsSchema,
   type AgentEvent,
   AgentEventSchema,
   type AgentIdentityParams,
@@ -232,6 +234,7 @@ export const validateResponseFrame = ajv.compile<ResponseFrame>(ResponseFrameSch
 export const validateEventFrame = ajv.compile<EventFrame>(EventFrameSchema);
 export const validateSendParams = ajv.compile(SendParamsSchema);
 export const validatePollParams = ajv.compile<PollParams>(PollParamsSchema);
+export const validateAgentAbortParams = ajv.compile<AgentAbortParams>(AgentAbortParamsSchema);
 export const validateAgentParams = ajv.compile(AgentParamsSchema);
 export const validateAgentIdentityParams =
   ajv.compile<AgentIdentityParams>(AgentIdentityParamsSchema);
@@ -400,6 +403,7 @@ export function formatValidationErrors(errors: ErrorObject[] | null | undefined)
 }
 
 export {
+  AgentAbortParamsSchema,
   ConnectParamsSchema,
   HelloOkSchema,
   RequestFrameSchema,
@@ -494,6 +498,7 @@ export {
 };
 
 export type {
+  AgentAbortParams,
   GatewayFrame,
   ConnectParams,
   HelloOk,

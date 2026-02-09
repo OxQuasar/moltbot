@@ -271,6 +271,11 @@
         "timeoutSeconds"
       ]
     },
+    "sessions_stop": {
+      "emoji": "🛑",
+      "title": "Stop Sub-agent",
+      "detailKeys": ["runId"]
+    },
     "session_status": {
       "emoji": "📊",
       "title": "Session Status",

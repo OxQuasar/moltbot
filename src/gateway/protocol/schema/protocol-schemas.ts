@@ -1,5 +1,6 @@
 import type { TSchema } from "@sinclair/typebox";
 import {
+  AgentAbortParamsSchema,
   AgentEventSchema,
   AgentIdentityParamsSchema,
   AgentIdentityResultSchema,
@@ -154,6 +155,7 @@ export const ProtocolSchemas: Record<string, TSchema> = {
   AgentParams: AgentParamsSchema,
   AgentIdentityParams: AgentIdentityParamsSchema,
   AgentIdentityResult: AgentIdentityResultSchema,
+  AgentAbortParams: AgentAbortParamsSchema,
   AgentWaitParams: AgentWaitParamsSchema,
   WakeParams: WakeParamsSchema,
   NodePairRequestParams: NodePairRequestParamsSchema,

@@ -2,7 +2,7 @@ import type { OpenClawConfig } from "../../config/config.js";
 import type { FinalizedMsgContext, MsgContext } from "../templating.js";
 import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { abortEmbeddedPiRun } from "../../agents/pi-embedded.js";
-import { listSubagentRunsForRequester } from "../../agents/subagent-registry.js";
+import { getSubagentRun, listSubagentRunsForRequester } from "../../agents/subagent-registry.js";
 import {
   resolveInternalSessionKey,
   resolveMainSessionAlias,
@@ -130,6 +130,45 @@ export function stopSubagentsForRequester(params: {
     logVerbose(`abort: stopped ${stopped} subagent run(s) for ${requesterKey}`);
   }
   return { stopped };
+}
+
+export function stopSubagentByRunId(params: {
+  cfg: OpenClawConfig;
+  runId: string;
+  requesterSessionKey?: string;
+}): { stopped: boolean; reason?: string } {
+  const run = getSubagentRun(params.runId);
+  if (!run) {
+    return { stopped: false, reason: "not_found" };
+  }
+  if (run.endedAt) {
+    return { stopped: false, reason: "already_ended" };
+  }
+  if (
+    params.requesterSessionKey &&
+    run.requesterSessionKey !== normalizeRequesterSessionKey(params.cfg, params.requesterSessionKey)
+  ) {
+    return { stopped: false, reason: "forbidden" };
+  }
+
+  const childKey = run.childSessionKey?.trim();
+  if (!childKey) {
+    return { stopped: false, reason: "no_child_session" };
+  }
+
+  clearSessionQueues([childKey]);
+
+  const parsed = parseAgentSessionKey(childKey);
+  const storePath = resolveStorePath(params.cfg.session?.store, { agentId: parsed?.agentId });
+  const store = loadSessionStore(storePath);
+  const entry = store[childKey];
+  const sessionId = entry?.sessionId;
+  const aborted = sessionId ? abortEmbeddedPiRun(sessionId) : false;
+
+  if (aborted) {
+    logVerbose(`abort: stopped subagent runId=${params.runId} sessionId=${sessionId}`);
+  }
+  return { stopped: true };
 }
 
 export async function tryFastAbortFromMessage(params: {

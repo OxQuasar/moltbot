@@ -76,6 +76,7 @@ const READ_METHODS = new Set([
 const WRITE_METHODS = new Set([
   "send",
   "agent",
+  "agent.abort",
   "agent.wait",
   "wake",
   "talk.mode",

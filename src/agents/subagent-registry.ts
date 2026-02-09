@@ -417,6 +417,10 @@ export function releaseSubagentRun(runId: string) {
   }
 }
 
+export function getSubagentRun(runId: string): SubagentRunRecord | undefined {
+  return subagentRuns.get(runId);
+}
+
 export function listSubagentRunsForRequester(requesterSessionKey: string): SubagentRunRecord[] {
   const key = requesterSessionKey.trim();
   if (!key) {

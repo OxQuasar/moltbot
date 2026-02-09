@@ -33,6 +33,7 @@ import {
   ErrorCodes,
   errorShape,
   formatValidationErrors,
+  validateAgentAbortParams,
   validateAgentIdentityParams,
   validateAgentParams,
   validateAgentWaitParams,
@@ -510,6 +511,31 @@ export const agentHandlers: GatewayRequestHandlers = {
       startedAt: snapshot.startedAt,
       endedAt: snapshot.endedAt,
       error: snapshot.error,
+    });
+  },
+  "agent.abort": async ({ params, respond }) => {
+    if (!validateAgentAbortParams(params)) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          `invalid agent.abort params: ${formatValidationErrors(validateAgentAbortParams.errors)}`,
+        ),
+      );
+      return;
+    }
+    const { runId } = params as { runId: string };
+    const cfg = loadConfig();
+    // Lazy import to avoid pulling in transitive dependencies at module load time
+    // (auto-reply/reply/abort → sandbox/constants → STATE_DIR).
+    const { stopSubagentByRunId } = await import("../../auto-reply/reply/abort.js");
+    const result = stopSubagentByRunId({ cfg, runId });
+    respond(true, {
+      ok: true,
+      runId,
+      stopped: result.stopped,
+      reason: result.reason,
     });
   },
 };

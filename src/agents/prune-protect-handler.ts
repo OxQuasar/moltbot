@@ -55,14 +55,14 @@ export function createPruneProtectHandler(): {
     if (isProtectedRead(ctx.toolName, event.toolArgs)) {
       skillReadActive = true;
       return {
-        message: { ...event.message, pruneProtect: true } as AgentMessage,
+        message: { ...event.message, pruneProtect: true } as unknown as AgentMessage,
       };
     }
 
     // Turn-based protection: tag all reads following a skill read
     if (skillReadActive && ctx.toolName === "read") {
       return {
-        message: { ...event.message, pruneProtect: true } as AgentMessage,
+        message: { ...event.message, pruneProtect: true } as unknown as AgentMessage,
       };
     }
   }
@@ -88,7 +88,7 @@ export function pruneProtectHandler(
 
   if (isProtectedRead(ctx.toolName, event.toolArgs)) {
     return {
-      message: { ...event.message, pruneProtect: true } as AgentMessage,
+      message: { ...event.message, pruneProtect: true } as unknown as AgentMessage,
     };
   }
 }
